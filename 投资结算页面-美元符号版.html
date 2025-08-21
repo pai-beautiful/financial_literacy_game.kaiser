@@ -1,0 +1,254 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>全民投资大战 · 结算页面</title>
+<style>
+  :root{
+    --bg:#fffaf1;
+    --card:#ffffff;
+    --ink:#2b2b2b;
+    --muted:#7a7a7a;
+    --border:#e8e2d8;
+    --pos:#0a7f2e;
+    --neg:#b00020;
+    --accent:#f4c15d;
+  }
+  html,body{background:var(--bg);color:var(--ink);margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;line-height:1.45}
+  header{position:sticky;top:0;background:linear-gradient(#fffaf1ee,#fffaf1ee);backdrop-filter:saturate(120%) blur(6px);z-index:10;border-bottom:1px solid var(--border)}
+  .wrap{max-width:1200px;margin:0 auto;padding:14px 18px}
+  h1{font-size:22px;margin:0 0 6px}
+  .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .controls > *{font-size:14px}
+  input[type="number"], input[type="text"]{border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:#fff;min-width:70px}
+  button{border:1px solid var(--border);background:var(--card);padding:8px 12px;border-radius:12px;cursor:pointer}
+  button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+  button.ghost{background:transparent}
+  .grid{display:grid;grid-template-columns:1fr;gap:20px;margin-top:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:0 6px 18px rgba(0,0,0,.04)}
+  .card .wrap{padding:12px 14px;}
+  .card h2{font-size:18px;margin:10px 0}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{border-top:1px solid var(--border);padding:8px 10px;text-align:right;white-space:nowrap}
+  th:first-child, td:first-child{text-align:center}
+  th:nth-child(2), td:nth-child(2){text-align:left}
+  th:nth-child(3), td:nth-child(3){text-align:left}
+  thead th{position:sticky;top:0;background:#fff;border-top:0}
+  tfoot td{font-weight:700;background:#fff}
+  .muted{color:var(--muted)}
+  .pill{display:inline-block;background:#fff;border:1px solid var(--border);padding:2px 8px;border-radius:999px;font-size:12px}
+  .pos{color:var(--pos)}
+  .neg{color:var(--neg)}
+  .sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:8px 0}
+  .sum .box{background:#fff;border:1px solid var(--border);border-radius:12px;padding:8px 10px}
+  .sum .box b{display:block;font-size:13px;color:var(--muted);font-weight:600}
+  .sum .box span{font-size:18px}
+  .footer-note{color:var(--muted);font-size:12px;margin-top:10px}
+  .badge{background:var(--accent);padding:2px 8px;border-radius:999px;margin-left:6px;font-size:12px}
+  .sticky-actions{position:fixed;right:14px;bottom:14px;display:flex;flex-direction:column;gap:8px}
+  @media (max-width:640px){
+    .sum{grid-template-columns:repeat(2,1fr)}
+  }
+
+  @media (max-width: 768px) {
+    .grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+  .card {
+    overflow: hidden;
+  }
+  .card table {
+    width: 100%;
+  }
+
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>全民投资大战 · 结算页面 <span class="badge">A–F 六只股票</span></h1>
+    <div class="controls">
+      <label>组别数量：
+        <input id="groupCount" type="number" min="1" max="20" value="4" />
+      </label>
+      <button class="primary" id="build">生成/刷新表格</button>
+      <button id="resetAll">重置所有价格为默认</button>
+      <span class="pill">默认起始资金：$<span id="defaultCash">100000</span> / 组（可在卡片中改）</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="grid" class="grid"></div>
+  <div class="footer-note">
+    说明：初始/年末默认价格参考你提供的 PPT（可随时修改；所有数值变更后自动联动计算）。盈亏＝（年末价－买入价）× 股数。  
+  </div>
+</main>
+
+<div class="sticky-actions">
+  <button onclick="window.print()">打印 / 保存 PDF</button>
+</div>
+
+<script>
+const DEFAULT_STOCKS = [
+  {code:"A", name:"科技先锋", sector:"科技",    init:10.00, end:13.00},
+  {code:"B", name:"黄金之路", sector:"贵金属",  init:5.00,  end:4.75},
+  {code:"C", name:"健康中国", sector:"医药",    init:8.00,  end:8.80},
+  {code:"D", name:"蓝天能源", sector:"新能源",  init:6.00,  end:9.00},
+  {code:"E", name:"泡沫地产", sector:"房地产",  init:15.00, end:13.50},
+  {code:"F", name:"银行巨头", sector:"金融",    init:12.00, end:12.60},
+];
+const DEFAULT_CASH = 100000;
+const el = sel => document.querySelector(sel);
+const fmt = n => new Intl.NumberFormat('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2}).format(+n || 0);
+
+function makeGroupCard(groupIndex){
+  const card = document.createElement('section');
+  card.className = 'card';
+  card.dataset.group = groupIndex;
+  card.dataset.default = JSON.stringify(DEFAULT_STOCKS);
+  const headerHTML = `
+    <div class="wrap">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h2>第 ${groupIndex+1} 组</h2>
+          <div class="muted">可自定义本组初始/年末价格与买入股数</div>
+        </div>
+        <div class="row" style="gap:8px">
+          <label>起始资金($)：<input type="number" step="1" value="${DEFAULT_CASH}" class="cash-input"></label>
+          <button class="ghost" onclick="resetGroup(${groupIndex})">重置本组价格</button>
+        </div>
+      </div>
+      <div class="sum">
+        <div class="box"><b>已投入</b><span id="invested-${groupIndex}">$0.00</span></div>
+        <div class="box"><b>剩余现金</b><span id="cashleft-${groupIndex}">$0.00</span></div>
+        <div class="box"><b>期末市值</b><span id="mktval-${groupIndex}">$0.00</span></div>
+        <div class="box"><b>总盈亏</b><span id="pnl-${groupIndex}" class="">$0.00</span></div>
+      </div>
+    </div>
+  `;
+  const rowsHTML = DEFAULT_STOCKS.map((s, i) => `
+    <tr data-row="${i}">
+      <td>${s.code}</td>
+      <td>${s.name}</td>
+      <td>${s.sector}</td>
+      <td><input type="number" step="0.01" value="${s.init}" class="init"></td>
+      <td><input type="number" step="1" value="0" class="qty"></td>
+      <td class="invested">$0.00</td>
+      <td><input type="number" step="0.01" value="${s.end}" class="end"></td>
+      <td class="pnl">$0.00</td>
+    </tr>
+  `).join('');
+  card.innerHTML = `
+    ${headerHTML}
+    <div style="padding:0 14px 14px">
+      <table>
+        <thead>
+          <tr>
+            <th>代码</th>
+            <th>股票名称</th>
+            <th>板块</th>
+            <th>买入价($)</th>
+            <th>股数</th>
+            <th>投入金额($)</th>
+            <th>年末价($)</th>
+            <th>盈亏($)</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHTML}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="5" style="text-align:right">合计：</td>
+            <td id="subtotal-invest-${groupIndex}">$0.00</td>
+            <td class="muted">—</td>
+            <td id="subtotal-pnl-${groupIndex}">$0.00</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="footer-note">提示：修改任一价格或股数将自动刷新计算；盈亏＝（年末价－买入价）× 股数。</div>
+    </div>
+  `;
+  card.querySelectorAll('input').forEach(inp=>{
+    inp.addEventListener('input', ()=>recalcGroup(card));
+  });
+  recalcGroup(card);
+  return card;
+}
+
+function recalcGroup(card){
+  const groupIndex = +card.dataset.group;
+  const cash = +card.querySelector('.cash-input').value || 0;
+  let investedTotal = 0;
+  let pnlTotal = 0;
+  let endValueTotal = 0;
+  card.querySelectorAll('tbody tr').forEach(tr=>{
+    const init = +tr.querySelector('.init').value || 0;
+    const qty  = +tr.querySelector('.qty').value || 0;
+    const endp = +tr.querySelector('.end').value || 0;
+    const invested = init * qty;
+    const pnl = (endp - init) * qty;
+    const mkt = endp * qty;
+    investedTotal += invested;
+    pnlTotal += pnl;
+    endValueTotal += mkt;
+    tr.querySelector('.invested').textContent = '$' + fmt(invested);
+    const pnlCell = tr.querySelector('.pnl');
+    pnlCell.textContent = '$' + fmt(pnl);
+    pnlCell.classList.remove('pos','neg');
+    if (pnl > 0) pnlCell.classList.add('pos');
+    if (pnl < 0) pnlCell.classList.add('neg');
+  });
+  card.querySelector(`#subtotal-invest-${groupIndex}`).textContent = '$' + fmt(investedTotal);
+  const subtotalPNL = card.querySelector(`#subtotal-pnl-${groupIndex}`);
+  subtotalPNL.textContent = '$' + fmt(pnlTotal);
+  subtotalPNL.classList.toggle('pos', pnlTotal>0);
+  subtotalPNL.classList.toggle('neg', pnlTotal<0);
+
+  card.querySelector(`#invested-${groupIndex}`).textContent = '$' + fmt(investedTotal);
+  card.querySelector(`#cashleft-${groupIndex}`).textContent = '$' + fmt(cash - investedTotal);
+  card.querySelector(`#mktval-${groupIndex}`).textContent = '$' + fmt(endValueTotal);
+  const pnlEl = card.querySelector(`#pnl-${groupIndex}`);
+  pnlEl.textContent = '$' + fmt(pnlTotal);
+  pnlEl.classList.toggle('pos', pnlTotal>0);
+  pnlEl.classList.toggle('neg', pnlTotal<0);;
+  pnlEl.textContent = '$' + fmt(pnlTotal);
+  pnlEl.classList.toggle('pos', pnlTotal>0);
+  pnlEl.classList.toggle('neg', pnlTotal<0);
+}
+
+function resetGroup(groupIndex){
+  const card = document.querySelector(`.card[data-group="${groupIndex}"]`);
+  const defaults = JSON.parse(card.dataset.default);
+  card.querySelectorAll('tbody tr').forEach((tr, i)=>{
+    tr.querySelector('.init').value = defaults[i].init;
+    tr.querySelector('.end').value  = defaults[i].end;
+  });
+  recalcGroup(card);
+}
+
+function build(){
+  const grid = el('#grid');
+  grid.innerHTML = '';
+  const n = Math.max(1, Math.min(20, +el('#groupCount').value || 1));
+  for(let i=0;i<n;i++){
+    grid.appendChild(makeGroupCard(i));
+  }
+}
+
+el('#build').addEventListener('click', build);
+el('#resetAll').addEventListener('click', ()=>{
+  document.querySelectorAll('.card').forEach(c=>{
+    resetGroup(+c.dataset.group);
+  });
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  build();
+});
+</script>
+</body>
+</html>
